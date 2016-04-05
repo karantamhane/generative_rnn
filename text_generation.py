@@ -25,7 +25,7 @@ class ReadTextFile(object):
             yield data
 
 def build_categories(filename):
-    with ReadTextFile("scripts.txt") as reader:
+    with ReadTextFile(filename) as reader:
         data = reader.batch().next()
         data_size = len(data)
         classes = list(set(data))
@@ -37,18 +37,13 @@ def build_categories(filename):
 
 # TODO Use word2vec after getting initial version working
 class LSTM(object):
-    def __init__(self, num_nodes=128, data_file="scripts.txt", batch_size=4096):
+    def __init__(self, num_nodes=128, data_file="stories.txt", batch_size=4096):
         self.num_nodes = num_nodes
         self.data_file = data_file
         self.batch_size = batch_size
 
     def one_hot(self, indices, num_classes):
-        output = []
-        for i in indices:
-            vect = [0.0]*num_classes
-            vect[i] = 1.0
-            output.append(vect)
-        return np.array(output)
+        return np.eye(num_classes)[indices]
 
     def train(self, num_epochs):
         # Build classes from data
@@ -59,17 +54,15 @@ class LSTM(object):
         self.num_classes = len(self.classes)
         self.num_epochs = num_epochs
         forget_bias = 1.0
-        learning_rate = 0.2
+        learning_rate = 0.1
         next_char_sample_size = 5
         keep_prob = 0.5
 
 
-        with tf.Graph().as_default(), tf.Session() as session:
+        with tf.Graph().as_default(), tf.Session() as session, tf.variable_scope("lstm"):
             # Placeholder for input data feed
             x = tf.placeholder(tf.float32, shape=[None, self.num_classes])
-            # Weights and biases for first hidden layer
-            W_hidden = tf.Variable(tf.truncated_normal(shape=[self.num_classes, self.num_nodes]))
-            b_hidden = tf.Variable(tf.truncated_normal(shape=[self.num_nodes]))
+
             # Placeholder for label data feed
             y = tf.placeholder(tf.float32, shape=[None, self.num_classes])
 
@@ -78,16 +71,14 @@ class LSTM(object):
             lstm = tf.nn.rnn_cell.DropoutWrapper(lstm, output_keep_prob=keep_prob)
             state = tf.zeros(shape=[self.batch_size, lstm.state_size])
 
-            # Output of first fully connected layer
-            output = tf.matmul(x, W_hidden) + b_hidden
             # Output of LSTM layer
-            output, state = lstm(output, state)
+            output, state = lstm(x, state, scope="lstm")
 
-            # Weights and biases for second hidden layer
+            # Weights and biases for the fully connected layer
             W_output = tf.Variable(tf.truncated_normal(shape=[self.num_nodes, self.num_classes]))
             b_output = tf.Variable(tf.truncated_normal(shape=[self.num_classes]))
 
-            # Output of second fully connected layer
+            # Output of fully connected layer
             logits = tf.matmul(output, W_output) + b_output
             # Calculate class probabilities
             probs = tf.nn.softmax(logits)
@@ -96,7 +87,8 @@ class LSTM(object):
 
             # Optimization step for training the model
             # training_step = tf.train.AdagradOptimizer(learning_rate=learning_rate).minimize(loss)
-            training_step = tf.train.RMSPropOptimizer(learning_rate=learning_rate, decay=0.9).minimize(loss)
+            # training_step = tf.train.RMSPropOptimizer(learning_rate=learning_rate, decay=0.9).minimize(loss)
+            training_step = tf.train.GradientDescentOptimizer(0.1).minimize(loss)
             # Initialize variables
             session.run(tf.initialize_all_variables())
 
@@ -104,7 +96,7 @@ class LSTM(object):
             for epoch in range(self.num_epochs):
                 # print 'Epoch number:',epoch
                 # Process data in batches
-                with ReadTextFile("stories.txt", self.batch_size+1) as reader:
+                with ReadTextFile(self.data_file, self.batch_size+1) as reader:
                     for step in range(int(self.data_size/(self.batch_size+1))):
                         # Reuse variables for training
                         if step > 0:
@@ -127,7 +119,7 @@ class LSTM(object):
 
                 # TODO Look into using Savers for checkpointing the model
                 # Sample text at regular intervals
-                if epoch % 2 == 0:
+                if epoch % 100 == 0:
                     # Number of chars to generate
                     num_steps = 1000
                     # Start with random seed char
@@ -146,6 +138,7 @@ class LSTM(object):
                     # Write generated text to outputs file with expt parameters
                     contents = "".join(out)
                     with open("outputs.txt", "a") as output_file:
+                        output_file.write("Input file: {}".format(self.data_file)+"\n")
                         output_file.write("Number of epochs: {}".format(epoch)+"\n")
                         output_file.write("Number of lstm nodes: {}".format(self.num_nodes)+"\n")
                         output_file.write("Keep prob: {}".format(keep_prob)+"\n")
@@ -162,7 +155,7 @@ class LSTM(object):
 
 def main():
     for num_nodes in [128]:
-        model = LSTM(num_nodes)
+        model = LSTM(num_nodes=num_nodes, data_file="scripts.txt")
         for num_epochs in [1000]:
             model.train(num_epochs)
 
