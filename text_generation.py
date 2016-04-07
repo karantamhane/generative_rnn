@@ -53,10 +53,13 @@ class LSTM(object):
             print "Could not read file {}" %self.data_file
         self.num_classes = len(self.classes)
         self.num_epochs = num_epochs
+        num_layers = 2
         forget_bias = 1.0
         learning_rate = 0.1
         next_char_sample_size = 5
         keep_prob = 0.5
+        num_parts = 5
+        interval = elapsed = int(num_epochs/num_parts)
 
 
         with tf.Graph().as_default(), tf.Session() as session, tf.variable_scope("lstm"):
@@ -67,7 +70,8 @@ class LSTM(object):
             y = tf.placeholder(tf.float32, shape=[None, self.num_classes])
 
             # LSTM cell with dropout and initial state = 0
-            lstm = rnn_cell.BasicLSTMCell(num_units=self.num_nodes, forget_bias=forget_bias)
+            cell = rnn_cell.BasicLSTMCell(num_units=self.num_nodes, forget_bias=forget_bias)
+            lstm = rnn_cell.MultiRNNCell([cell]*num_layers)
             lstm = tf.nn.rnn_cell.DropoutWrapper(lstm, output_keep_prob=keep_prob)
             state = tf.zeros(shape=[self.batch_size, lstm.state_size])
 
@@ -87,13 +91,13 @@ class LSTM(object):
 
             # Optimization step for training the model
             # training_step = tf.train.AdagradOptimizer(learning_rate=learning_rate).minimize(loss)
-            # training_step = tf.train.RMSPropOptimizer(learning_rate=learning_rate, decay=0.9).minimize(loss)
-            training_step = tf.train.GradientDescentOptimizer(0.1).minimize(loss)
+            training_step = tf.train.RMSPropOptimizer(learning_rate=learning_rate, decay=0.9).minimize(loss)
+            # training_step = tf.train.GradientDescentOptimizer(0.1).minimize(loss)
             # Initialize variables
             session.run(tf.initialize_all_variables())
 
             # Train the model
-            for epoch in range(self.num_epochs):
+            for epoch in range(1, self.num_epochs+1):
                 # print 'Epoch number:',epoch
                 # Process data in batches
                 with ReadTextFile(self.data_file, self.batch_size+1) as reader:
@@ -115,17 +119,20 @@ class LSTM(object):
                         # Run session to train model
                         session.run(training_step, feed_dict={x: training_data, y: training_labels})
                     # Display loss
-                    print "Loss for epoch {} = {}".format(epoch+1, loss.eval(feed_dict={x: training_data, y: training_labels}))
+                    print "Loss for epoch {} = {}".format(epoch, loss.eval(feed_dict={x: training_data, y: training_labels}))
 
                 # TODO Look into using Savers for checkpointing the model
                 # Sample text at regular intervals
                 if epoch % 100 == 0:
                     # Number of chars to generate
-                    num_steps = 1000
+                    num_steps = 500
                     # Start with random seed char
                     seed = random.choice(self.classes)
                     out = []
                     for step in range(num_steps):
+                        if epoch > elapsed:
+                            next_char_sample_size -= 1
+                            elapsed += interval
                         # print seed
                         out.append(seed)
                         # Hack to pass Y into feed dict - Possible issue?
@@ -147,7 +154,7 @@ class LSTM(object):
                         output_file.write("Batch size: {}".format(self.batch_size)+"\n")
                         output_file.write("Sample size for probabilistic generation: {}".format(next_char_sample_size)+"\n")
                         output_file.write("Learning rate: {}".format(learning_rate)+"\n\n")
-                        for chunk in range(0, len(out)-100, 100):
+                        for chunk in range(0, len(out), 100):
                             output_file.write(contents[chunk:chunk+100]+"\n")
                             # print contents[chunk:chunk+100]
                         output_file.write("\n")
@@ -155,7 +162,7 @@ class LSTM(object):
 
 def main():
     for num_nodes in [128]:
-        model = LSTM(num_nodes=num_nodes, data_file="scripts.txt")
+        model = LSTM(num_nodes=num_nodes, data_file="stories.txt")
         for num_epochs in [1000]:
             model.train(num_epochs)
 
